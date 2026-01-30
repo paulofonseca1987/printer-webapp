@@ -4,6 +4,7 @@ A tiny web app that lets anyone on the internet send messages directly to my the
 
 ![Flask](https://img.shields.io/badge/Flask-000000?style=flat&logo=flask&logoColor=white)
 ![Python](https://img.shields.io/badge/Python-3776AB?style=flat&logo=python&logoColor=white)
+[![CC0](https://img.shields.io/badge/license-CC0-blue.svg)](https://creativecommons.org/publicdomain/zero/1.0/)
 
 ## What is this?
 
@@ -57,7 +58,7 @@ The app sends ESC/POS commands over TCP to a print server or bridge that forward
 
 ## License
 
-Do whatever you want with it. Send me a message if you build something cool! 💌
+[CC0 1.0 Universal](LICENSE) — Public domain. Do whatever you want with it! 💌
 
 ---
 

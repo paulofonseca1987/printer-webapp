@@ -7,9 +7,8 @@ import multiprocessing
 bind = "0.0.0.0:5000"
 
 # Number of worker processes
-# For I/O bound apps like this, 2-4 workers per core is reasonable
-# But since we have a single print queue, using fewer workers is safer
-workers = 2
+# Using 1 worker because the print queue is in-memory and not shared between workers
+workers = 1
 
 # Worker class - sync is fine for this simple app
 worker_class = "sync"
@@ -32,5 +31,5 @@ loglevel = "info"
 # Process naming
 proc_name = "printer-webapp"
 
-# Preload app for faster worker startup
-preload_app = True
+# Don't preload - let each worker start its own print queue thread
+preload_app = False

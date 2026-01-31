@@ -20,6 +20,8 @@ This is a simple Flask app with a beautiful dark UI that connects to a thermal p
 - 🧾 ESC/POS thermal printer support
 - ⏰ Timestamps each message
 - 🌐 Tracks visitor IP (from Cloudflare headers)
+- ⏱️ Rate limiting to prevent spam
+- 💾 Message persistence (saved as markdown files)
 
 ## Setup
 

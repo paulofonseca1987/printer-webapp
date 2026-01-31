@@ -6,6 +6,7 @@ A simple web interface to send messages to a thermal printer via TCP bridge.
 
 import socket
 import textwrap
+import os
 from flask import Flask, render_template_string, request, flash, redirect, url_for
 from datetime import datetime
 
@@ -15,6 +16,14 @@ app.secret_key = 'change-this-to-something-random-in-production'
 # Configuration - update this to your Windows bridge IP
 PRINTER_HOST = "172.29.208.1"
 PRINTER_PORT = 9100
+MESSAGES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "messages")
+
+# Ensure messages directory exists
+os.makedirs(MESSAGES_DIR, exist_ok=True)
+
+# Rate limiting: track last submission time per IP
+rate_limit = {}
+RATE_LIMIT_SECONDS = 10
 
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
@@ -25,7 +34,7 @@ HTML_TEMPLATE = '''
     <title>Send me a message</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     
     <!-- Favicon and PWA -->
     <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
@@ -33,7 +42,7 @@ HTML_TEMPLATE = '''
     <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16.png">
     <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
     <link rel="manifest" href="/manifest.json">
-    <meta name="theme-color" content="#1a1a2e">
+    <meta name="theme-color" content="#0a0a0a">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Send Message">
@@ -45,240 +54,207 @@ HTML_TEMPLATE = '''
         }
         
         body {
-            font-family: 'Space Grotesk', sans-serif;
+            font-family: 'JetBrains Mono', monospace;
             min-height: 100vh;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            background: #0a0a0a;
             display: flex;
             align-items: center;
             justify-content: center;
             padding: 20px;
+            color: #fff;
         }
         
         .container {
             width: 100%;
-            max-width: 480px;
+            max-width: 500px;
         }
         
         .card {
-            background: rgba(255, 255, 255, 0.03);
-            backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 24px;
-            padding: 40px;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            background: #0a0a0a;
+            border: 1px solid #222;
+            border-radius: 8px;
+            padding: 32px;
+        }
+        
+        .header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 8px;
         }
         
         .icon {
-            width: 64px;
-            height: 64px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border-radius: 16px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin-bottom: 24px;
-            font-size: 28px;
+            font-size: 24px;
+            filter: grayscale(100%);
         }
         
         h1 {
             color: #fff;
-            font-size: 28px;
-            font-weight: 700;
-            margin-bottom: 8px;
+            font-size: 18px;
+            font-weight: 500;
         }
         
         .subtitle {
-            color: rgba(255, 255, 255, 0.5);
-            font-size: 15px;
+            color: #666;
+            font-size: 13px;
             margin-bottom: 32px;
-            line-height: 1.5;
-        }
-        
-        .form-group {
-            margin-bottom: 24px;
+            line-height: 1.6;
         }
         
         textarea {
             width: 100%;
-            height: 160px;
-            padding: 20px;
-            background: rgba(255, 255, 255, 0.05);
-            border: 2px solid rgba(255, 255, 255, 0.1);
-            border-radius: 16px;
-            font-size: 16px;
-            font-family: 'Space Grotesk', sans-serif;
+            height: 140px;
+            padding: 16px;
+            background: #111;
+            border: 1px solid #222;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', monospace;
             color: #fff;
             resize: none;
-            transition: all 0.3s ease;
+            transition: border-color 0.2s;
         }
         
         textarea::placeholder {
-            color: rgba(255, 255, 255, 0.3);
+            color: #444;
         }
         
         textarea:focus {
             outline: none;
-            border-color: #667eea;
-            background: rgba(255, 255, 255, 0.08);
-            box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.15);
+            border-color: #444;
         }
         
         .char-count {
             text-align: right;
-            color: rgba(255, 255, 255, 0.4);
-            font-size: 13px;
+            color: #444;
+            font-size: 12px;
             margin-top: 8px;
+            margin-bottom: 20px;
         }
         
         button {
             width: 100%;
-            padding: 18px 24px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
+            padding: 14px 20px;
+            background: #fff;
+            color: #000;
             border: none;
-            border-radius: 12px;
-            font-size: 16px;
-            font-weight: 600;
-            font-family: 'Space Grotesk', sans-serif;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            font-family: 'JetBrains Mono', monospace;
             cursor: pointer;
-            transition: all 0.3s ease;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 10px;
+            transition: all 0.2s;
         }
         
         button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 40px -10px rgba(102, 126, 234, 0.5);
+            background: #ddd;
         }
         
         button:active {
-            transform: translateY(0);
+            transform: scale(0.98);
         }
         
         .flash {
-            padding: 16px 20px;
-            border-radius: 12px;
-            margin-bottom: 24px;
-            font-size: 14px;
-            display: flex;
-            align-items: center;
-            gap: 12px;
+            padding: 12px 16px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            font-size: 13px;
         }
         
         .flash.success {
-            background: rgba(16, 185, 129, 0.15);
-            border: 1px solid rgba(16, 185, 129, 0.3);
-            color: #6ee7b7;
+            background: #0a1a0a;
+            border: 1px solid #1a3a1a;
+            color: #4a4;
         }
         
         .flash.error {
-            background: rgba(239, 68, 68, 0.15);
-            border: 1px solid rgba(239, 68, 68, 0.3);
-            color: #fca5a5;
+            background: #1a0a0a;
+            border: 1px solid #3a1a1a;
+            color: #a44;
         }
         
         .footer {
             text-align: center;
-            margin-top: 24px;
-            color: rgba(255, 255, 255, 0.3);
-            font-size: 13px;
+            margin-top: 20px;
+            color: #333;
+            font-size: 12px;
         }
         
         .footer a {
-            color: rgba(255, 255, 255, 0.5);
+            color: #444;
             text-decoration: none;
-            transition: color 0.2s;
         }
         
         .footer a:hover {
-            color: #667eea;
-        }
-        
-        .receipt-preview {
-            background: #fff;
-            color: #000;
-            padding: 16px;
-            border-radius: 8px;
-            font-family: 'Courier New', monospace;
-            font-size: 12px;
-            margin-top: 16px;
-            display: none;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-        }
-        
-        .receipt-preview.show {
-            display: block;
-        }
-        
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-        
-        .sending button {
-            animation: pulse 1.5s infinite;
-            pointer-events: none;
+            color: #666;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="card">
-            <div class="icon">🖨️</div>
-            <h1>Send me a message</h1>
-            <p class="subtitle">Type something nice and it will get automagically printed on my small receipt printer at home!</p>
+            <div class="header">
+                <span class="icon">🖨️</span>
+                <h1>send me a message</h1>
+            </div>
+            <p class="subtitle">and it will print on my thermal printer at home</p>
             
             {% with messages = get_flashed_messages(with_categories=true) %}
                 {% for category, message in messages %}
-                    <div class="flash {{ category }}">
-                        {% if category == 'success' %}✓{% else %}⚠{% endif %}
-                        {{ message }}
-                    </div>
+                    <div class="flash {{ category }}">{{ message }}</div>
                 {% endfor %}
             {% endwith %}
             
             <form method="POST" id="printForm">
-                <div class="form-group">
-                    <textarea 
-                        name="message" 
-                        placeholder="Write your message here..."
-                        maxlength="240"
-                        id="message"
-                    >{{ request.form.get('message', '') }}</textarea>
-                    <div class="char-count"><span id="count">0</span> / 240</div>
-                </div>
-                <button type="submit">
-                    <span>Print Message</span>
-                    <span>→</span>
-                </button>
+                <textarea 
+                    name="message" 
+                    placeholder="type something..."
+                    maxlength="240"
+                    id="message"
+                >{{ request.form.get('message', '') }}</textarea>
+                <div class="char-count"><span id="count">0</span>/240</div>
+                <button type="submit">print</button>
             </form>
         </div>
         
         <p class="footer">
-            Made with ♥ by <a href="https://paulofonseca.com" target="_blank">Paulo Fonseca</a>
+            <a href="https://paulofonseca.com" target="_blank">paulofonseca.com</a>
         </p>
     </div>
     
     <script>
         const textarea = document.getElementById('message');
         const count = document.getElementById('count');
-        const form = document.getElementById('printForm');
         
         textarea.addEventListener('input', function() {
             count.textContent = this.value.length;
         });
         
         count.textContent = textarea.value.length;
-        
-        form.addEventListener('submit', function() {
-            this.classList.add('sending');
-        });
     </script>
 </body>
 </html>
 '''
+
+def save_message(message, visitor_ip):
+    """Save a message to a markdown file with YAML frontmatter."""
+    now = datetime.now()
+    timestamp = now.strftime("%Y-%m-%d_%H-%M-%S")
+    filename = f"{timestamp}.md"
+    filepath = os.path.join(MESSAGES_DIR, filename)
+    
+    content = f"""---
+from: {visitor_ip}
+date: {now.strftime("%Y-%m-%d")}
+time: {now.strftime("%H:%M:%S")}
+---
+
+{message}
+"""
+    
+    with open(filepath, 'w', encoding='utf-8') as f:
+        f.write(content)
+
 
 def send_to_printer(message, visitor_ip):
     """Send a message to the thermal printer via TCP bridge."""
@@ -300,7 +276,7 @@ def send_to_printer(message, visitor_ip):
         # Build the print job
         now = datetime.now()
         time_str = now.strftime("%H:%M:%S")
-        date_str = now.strftime("%B %d").replace(" 0", " ")  # Remove leading zero from day
+        date_str = now.strftime("%B %d, %Y").replace(" 0", " ")  # Remove leading zero from day
         
         # Wrap text to 48 characters (typical for 80mm thermal paper)
         wrapped_message = textwrap.fill(message, width=48)
@@ -333,8 +309,8 @@ def manifest():
         "description": "Send a message to Paulo's thermal printer",
         "start_url": "/",
         "display": "standalone",
-        "background_color": "#1a1a2e",
-        "theme_color": "#1a1a2e",
+        "background_color": "#0a0a0a",
+        "theme_color": "#0a0a0a",
         "icons": [
             {
                 "src": "/static/apple-touch-icon.png",
@@ -366,8 +342,20 @@ def index():
             flash('Message too long (max 240 characters / 5 lines)', 'error')
         else:
             visitor_ip = request.headers.get('CF-Connecting-IP', request.headers.get('X-Forwarded-For', request.remote_addr))
+            
+            # Check rate limit
+            now = datetime.now()
+            if visitor_ip in rate_limit:
+                time_since_last = (now - rate_limit[visitor_ip]).total_seconds()
+                if time_since_last < RATE_LIMIT_SECONDS:
+                    remaining = int(RATE_LIMIT_SECONDS - time_since_last)
+                    flash(f'Please wait {remaining} seconds before sending another message', 'error')
+                    return render_template_string(HTML_TEMPLATE)
+            
             success, result = send_to_printer(message, visitor_ip)
             if success:
+                rate_limit[visitor_ip] = now
+                save_message(message, visitor_ip)
                 flash(result, 'success')
                 return redirect(url_for('index'))
             else:

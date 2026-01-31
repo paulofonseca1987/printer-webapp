@@ -1,0 +1,4 @@
+# Ignore all data files (rate limits, queue state)
+*
+!.gitignore
+!.gitkeep

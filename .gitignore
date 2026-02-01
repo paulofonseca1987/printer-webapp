@@ -24,3 +24,6 @@ build/
 .idea/
 *.swp
 *.swo
+
+# Tool artifacts
+.playwright-mcp/
